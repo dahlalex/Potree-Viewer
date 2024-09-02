@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="description" content="">
+	<meta name="author" content="">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>Potree Viewer</title>
+
+	<link rel="stylesheet" type="text/css" href="./libs/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="./libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="./libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="./libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="./libs/jstree/themes/mixed/style.css">
+	<style>
+		#msg {
+			display: none;
+			text-align: center;
+			color: black;
+			position: absolute;
+			left: 35%;
+			right: 30%;
+			top: 60%;
+			font-family: sans-serif;
+		}
+	</style>
+</head>
+
+<body>
+	<script src="./libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="./libs/spectrum/spectrum.js"></script>
+	<script src="./libs/jquery-ui/jquery-ui.min.js"></script>
+	<script src="./libs/other/BinaryHeap.js"></script>
+	<script src="./libs/tween/tween.min.js"></script>
+	<script src="./libs/d3/d3.js"></script>
+	<script src="./libs/proj4/proj4.js"></script>
+	<script src="./libs/openlayers3/ol.js"></script>
+	<script src="./libs/i18next/i18next.js"></script>
+	<script src="./libs/jstree/jstree.js"></script>
+	<script src="./libs/potree/potree.js"></script>
+	<script src="./libs/plasio/js/laslaz.js"></script>
+	<script src="./libs/shapefile/shapefile.js"></script>
+
+
+	<!-- INCLUDE ADDITIONAL DEPENDENCIES HERE -->
+	<!-- INCLUDE SETTINGS HERE -->
+
+	<div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; ">
+		<div id="msg">
+			<h3 style="font-family: sans-serif;">Just nu kan vi inte visa den här punktmolnet</h3>
+		</div>
+		<div id="potree_render_area"></div>
+		<div id="potree_sidebar_container"> </div>
+	</div>
+
+	<script type="module">
+		import * as THREE from "./libs/three.js/build/three.module.js";
+		// Create a function to get the parameter's value (uuid) from the URL 
+		function getParameter(parameterName) {
+			let parameter = new URLSearchParams(window.location.search);
+			return parameter.get(parameterName)
+		};
+		// save parameter's value in a varaible called uuid
+		let uuid = getParameter("uuid");
+
+
+		// create (src) attribute to the punktmoln based on the value of uuid
+		let src = `./pointclouds/${uuid}/cloud.js`;
+
+
+
+		// check if the requested file (src) exists
+		function doesFileExist(urlToFile) {
+			var xhr = new XMLHttpRequest();
+			xhr.open('HEAD', urlToFile, false);
+			xhr.send();
+			if (xhr.status == "404") {
+				return false;
+			} else {
+				return true;
+			}
+		}
+
+		let result = doesFileExist(src);
+
+		if (result == false) {
+			src = `./pointclouds/${uuid}/metadata.json`;
+			result = doesFileExist(src);
+		}
+		if (result == true) {
+
+			window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+
+			viewer.setFOV(60);
+			viewer.setPointBudget(2_000_000);
+			viewer.loadSettingsFromURL();
+
+			viewer.setDescription(`
+			<img src="./logo.png" style="opacity: 0.5;">
+			`);
+
+			viewer.loadGUI(() => {
+				viewer.setControls(viewer.earthControls);
+				viewer.setLanguage('se');
+				viewer.setEDLEnabled(false);
+			});
+
+
+
+			Potree.loadPointCloud(src, "3D", async e => {
+				let scene = viewer.scene;
+				let pointcloud = e.pointcloud;
+
+				let material = pointcloud.material;
+				material.size = 1;
+				material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+				material.shape = Potree.PointShape.CIRCLE;
+				material.activeAttributeName = "rgba";
+
+				scene.addPointCloud(pointcloud);
+
+				viewer.fitToScreen();
+
+				// Shapefile
+
+				{
+					const loader = new Potree.ShapefileLoader();
+					// group all shapefile scene nodes into this node
+					const shapeNode = new THREE.Object3D();
+					viewer.scene.scene.add(shapeNode);
+
+					// load fastighet.shp and change colors to green
+					const shpFastighet = await loader.load("./fastighet/fastighet.shp");
+					shapeNode.add(shpFastighet.node);
+
+					shpFastighet.node.traverse(node => {
+						if (node.material) {
+							node.material.color.set(0xffea00);
+						}
+					});
+
+					// this is necessary so that fat lines are correctly sized
+					viewer.addEventListener("update", () => {
+						const size = viewer.renderer.getSize(new THREE.Vector2());
+						shpFastighet.setResolution(size.width, size.height);
+					});
+
+					viewer.onGUILoaded(() => {
+						// Add entry to object list in sidebar
+						let tree = $(`#jstree_scene`);
+						let parentNode = "vectors";
+
+						let shpNaterialID = tree.jstree('create_node', parentNode, {
+							"text": "Fastighet",
+							"icon": `${Potree.resourcePath}/icons/triangle.svg`,
+							"object": shpFastighet.node,
+							"data": shpFastighet.node,
+						},
+							"last", false, false);
+						tree.jstree(shpFastighet.node.visible ? "check_node" : "uncheck_node", shpNaterialID);
+						tree.jstree('uncheck_node', shpNaterialID);
+					});
+
+				}
+			});
+
+		}
+		else {
+			console.log("File does not exist");
+			document.getElementById("potree_sidebar_container").style.display = "none";
+			document.getElementById("potree_render_area").style.display = "none";
+			document.getElementById("msg").style.display = "block";
+
+		}
+
+	</script>
+</body>
+
+</html>
